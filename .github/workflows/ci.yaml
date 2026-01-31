@@ -1,0 +1,55 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - hager-ci
+
+jobs:
+
+  build_scan:
+    name: Build And Scan Docker Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Build Image
+        run: docker build -t myapp:latest .
+
+      - name: Trivy Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: myapp:latest
+          format: json
+          output: trivy-report.json
+          exit-code: 0
+
+      - name: Upload Trivy Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report
+          path: trivy-report.json
+
+
+  push_image:
+    name: Push Image To DockerHub
+    needs: build_scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Build Image Again
+        run: docker build -t myapp:latest .
+
+      - name: Docker Login
+        run: echo "${{ secrets.DOCKER_PASS }}" | docker login -u "${{ secrets.DOCKER_USER }}" --password-stdin
+
+      - name: Tag Image
+        run: docker tag myapp:latest ${{ secrets.DOCKER_USER }}/myapp:ci
+
+      - name: Push Image
+        run: docker push ${{ secrets.DOCKER_USER }}/myapp:ci
