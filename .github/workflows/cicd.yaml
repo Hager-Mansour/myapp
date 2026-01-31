@@ -1,43 +1,72 @@
 name: CI-CD Pipeline
 
 on:
-  # Auto trigger على task branch
+  # CI Auto Trigger
   push:
     branches:
       - hager/task1
 
-  # Manual trigger علشان CD
+  # CD Manual Trigger
   workflow_dispatch:
     inputs:
       deploy_target:
-        description: "Choose deploy target"
+        description: "Choose deployment target"
         required: true
         type: choice
         options:
           - local
           - ec2
 
+
 jobs:
 
 # =========================
-# CI JOB
+# BUILD JOB
 # =========================
-  ci:
-    name: CI - Build, Scan, Artifact
+  build:
+    name: Build Docker Image
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout code
-      - name: Checkout repository
+
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2️⃣ Build Docker image
-      - name: Build Docker image
+      - name: Build Docker Image
         run: |
           docker build -t myapp:ci .
 
-      # 3️⃣ Trivy scan (HTML report)
-      - name: Trivy Scan (HTML report)
+      - name: Save Image As Artifact
+        run: |
+          docker save myapp:ci -o myapp-image.tar
+
+      - name: Upload Image Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: myapp-image.tar
+
+
+# =========================
+# SCAN JOB
+# =========================
+  scan:
+    name: Trivy Scan
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Download Image Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+
+      - name: Load Image
+        run: |
+          docker load -i myapp-image.tar
+
+      - name: Trivy Scan (HTML Report)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: myapp:ci
@@ -46,16 +75,12 @@ jobs:
           output: report.html
           exit-code: 0
 
-      # 4️⃣ Prepare scan artifact directory
-      - name: Prepare scan-dir artifact
+      - name: Prepare Scan Artifact
         run: |
           mkdir scan-dir
           cp report.html scan-dir/
-          cp Dockerfile scan-dir/
-          cp index.html scan-dir/
 
-      # 5️⃣ Upload artifact
-      - name: Upload scan artifact
+      - name: Upload Scan Artifact
         uses: actions/upload-artifact@v4
         with:
           name: scan-dir
@@ -63,24 +88,60 @@ jobs:
 
 
 # =========================
-# CD JOB (CONDITIONAL)
+# PUSH JOB
 # =========================
-  cd:
-    name: CD - Conditional Deploy
-    needs: ci
+  push:
+    name: Push Image To DockerHub
+    needs: scan
     runs-on: ubuntu-latest
 
     steps:
-      # Local deploy (dry run)
-      - name: Deploy to Local (Dry Run)
+
+      - name: Download Image Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+
+      - name: Load Image
+        run: |
+          docker load -i myapp-image.tar
+
+      - name: Docker Login
+        run: |
+          echo "${{ secrets.DOCKER_PASS }}" | docker login -u "${{ secrets.DOCKER_USER }}" --password-stdin
+
+      - name: Tag Image
+        run: |
+          docker tag myapp:ci ${{ secrets.DOCKER_USER }}/myapp:ci
+
+      - name: Push Image
+        run: |
+          docker push ${{ secrets.DOCKER_USER }}/myapp:ci
+
+
+# =========================
+# CD JOB (CONDITIONAL)
+# =========================
+  cd:
+    name: Deploy Job
+    needs: push
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # -------- LOCAL DEPLOY --------
+      - name: Deploy To Local
         if: github.event.inputs.deploy_target == 'local'
         run: |
-          echo "CD selected: LOCAL environment"
-          echo "Here will be local deployment logic"
+          echo "Deploying to LOCAL machine..."
+          echo "docker pull ${{ secrets.DOCKER_USER }}/myapp:ci"
+          echo "docker run -d -p 8080:80 myapp"
 
-      # EC2 deploy (dry run)
-      - name: Deploy to EC2 (Dry Run)
+      # -------- EC2 DEPLOY --------
+      - name: Deploy To EC2
         if: github.event.inputs.deploy_target == 'ec2'
         run: |
-          echo "CD selected: EC2 environment"
-          echo "Here will be EC2 deployment logic"
+          echo "Deploying to EC2..."
+          echo "SSH into EC2"
+          echo "docker pull ${{ secrets.DOCKER_USER }}/myapp:ci"
+          echo "docker run -d -p 80:80 myapp"
