@@ -6,7 +6,7 @@ on:
       - hager-ci
 
 jobs:
-  docker-pipeline:
+  docker:
     runs-on: ubuntu-latest
 
     steps:
@@ -15,16 +15,14 @@ jobs:
       uses: actions/checkout@v4
 
 
-    # ---------------- BUILD ----------------
-
-    - name: Build Docker Image
+    # -------- BUILD --------
+    - name: Build Image
       run: |
         docker build -t myapp:latest .
 
 
-    # ---------------- SCAN ----------------
-
-    - name: Trivy Scan (JSON Report)
+    # -------- SCAN --------
+    - name: Trivy Scan
       uses: aquasecurity/trivy-action@master
       with:
         image-ref: myapp:latest
@@ -40,27 +38,25 @@ jobs:
         path: trivy-report.json
 
 
-    # ---------------- DEBUG SECRET ----------------
-
-    - name: Debug Docker Username
+    # -------- DEBUG --------
+    - name: Check Docker Username
       run: |
-        echo "Docker User => ${{ secrets.DOCKER_USER }}"
+        echo "USER=${{ secrets.DOCKER_USER }}"
 
 
-    # ---------------- LOGIN ----------------
-
-    - name: DockerHub Login
+    # -------- LOGIN --------
+    - name: Docker Login
       run: |
         echo "${{ secrets.DOCKER_PASS }}" | docker login -u "${{ secrets.DOCKER_USER }}" --password-stdin
 
 
-    # ---------------- PUSH ----------------
-
+    # -------- TAG --------
     - name: Tag Image
       run: |
         docker tag myapp:latest ${{ secrets.DOCKER_USER }}/myapp:ci
 
 
-    - name: Push Image To DockerHub
+    # -------- PUSH --------
+    - name: Push Image
       run: |
         docker push ${{ secrets.DOCKER_USER }}/myapp:ci
